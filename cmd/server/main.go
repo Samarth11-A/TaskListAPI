@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc/reflection"
 )
 
 const (
@@ -154,7 +155,7 @@ func main() {
 	taskRepo := database.NewTaskRepository(db)
 
 	// Initialize gRPC server
-	lis, err := net.Listen("tcp", cfg.ServerPort)
+	lis, err := net.Listen("tcp", getNetworkAddress(cfg.SConfig.ServerName, cfg.SConfig.Port))
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
@@ -165,8 +166,17 @@ func main() {
 	}
 	pb.RegisterTaskListServer(s, taskServer)
 
-	log.Printf("Server listening on port %s", cfg.ServerPort)
+	if cfg.AppConfig.Environment == "development" {
+		log.Printf("Running in development mode")
+		reflection.Register(s)
+	}
+
+	log.Printf("Server listening on port %s", cfg.SConfig.Port)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
 	}
+}
+
+func getNetworkAddress(serverName string, port string) string {
+	return net.JoinHostPort(serverName, port)
 }
