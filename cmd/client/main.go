@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	pb "github.com/Samarth11-A/TaskListAPI/api/proto"
+	pb "github.com/Samarth11-A/TaskList_proto/api"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

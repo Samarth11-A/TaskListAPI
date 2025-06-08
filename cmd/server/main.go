@@ -6,9 +6,10 @@ import (
 	"net"
 	"time"
 
-	pb "github.com/Samarth11-A/TaskListAPI/api/proto"
 	"github.com/Samarth11-A/TaskListAPI/internal/config"
 	"github.com/Samarth11-A/TaskListAPI/internal/database"
+	"github.com/Samarth11-A/TaskListAPI/internal/models"
+	pb "github.com/Samarth11-A/TaskList_proto/api"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,42 +27,41 @@ type server struct {
 	taskRepo *database.TaskRepository
 }
 
-// CreateTask creates a new task and adds it to the in-memory store
-func (s *server) CreateTask(ctx context.Context, req *pb.CreateTaskRequest) (*pb.Task, error) {
+// CreateTask creates a new task and adds it to the database
+func (s *server) CreateTask(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error) {
 	log.Printf("Received CreateTask request: %v", req)
 
-	// Basic validation
-	if req.Title == "" {
-		return nil, status.Error(codes.InvalidArgument, "title cannot be empty")
+	// Convert protobuf request to internal model
+	createReq := models.FromProtoCreateTaskRequest(req)
+
+	// Validate the request
+	if err := createReq.Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "validation failed: %v", err)
 	}
 
-	// Create a new task
-	now := time.Now().Format(time.RFC3339)
-	task := &pb.Task{
-		Id:          uuid.New().String(),
-		Title:       req.Title,
-		Description: req.Description,
+	// Create internal task model
+	now := time.Now()
+	task := &models.Task{
+		ID:          uuid.New().String(),
+		Title:       createReq.Title,
+		Description: createReq.Description,
 		Completed:   false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
 
 	// Store the task
-	// s.tasks[task.Id] = task
-
-	// log.Printf("Created task with ID: %s", task.Id)
-	// return task, nil
 	if err := s.taskRepo.CreateTask(ctx, task); err != nil {
 		log.Printf("Failed to create task: %v", err)
 		return nil, status.Errorf(codes.Internal, "failed to create task: %v", err)
 	}
 
-	log.Printf("Created task with ID: %s", task.Id)
-	return task, nil
+	log.Printf("Created task with ID: %s", task.ID)
+	return task.ToProtoCreateTaskResponse(), nil
 }
 
 // GetTask retrieves a task by ID
-func (s *server) GetTask(ctx context.Context, req *pb.GetTaskRequest) (*pb.Task, error) {
+func (s *server) GetTask(ctx context.Context, req *pb.GetTaskRequest) (*pb.GetTaskResponse, error) {
 	log.Printf("Received GetTask request: %v", req)
 
 	task, err := s.taskRepo.GetTask(ctx, req.Id)
@@ -69,43 +69,48 @@ func (s *server) GetTask(ctx context.Context, req *pb.GetTaskRequest) (*pb.Task,
 		return nil, status.Errorf(codes.NotFound, "task with ID %s not found", req.Id)
 	}
 
-	return task, nil
+	return task.ToProtoGetTaskResponse(), nil
 }
 
 // ListTasks returns a list of all tasks
 func (s *server) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.ListTasksResponse, error) {
 	log.Printf("Received ListTasks request: %v", req)
 
-	tasks, err := s.taskRepo.ListTasks(ctx)
+	// Convert protobuf request to internal model
+	listReq := models.FromProtoListTasksRequest(req)
+
+	tasks, err := s.taskRepo.ListTasks(ctx, listReq)
 	if err != nil {
 		log.Printf("Failed to list tasks: %v", err)
 		return nil, status.Errorf(codes.Internal, "failed to list tasks: %v", err)
 	}
 
-	return &pb.ListTasksResponse{
-		Tasks: tasks,
-	}, nil
+	return tasks.ToProtoListTasksResponse(), nil
 }
 
 // UpdateTask updates an existing task
-func (s *server) UpdateTask(ctx context.Context, req *pb.UpdateTaskRequest) (*pb.Task, error) {
+func (s *server) UpdateTask(ctx context.Context, req *pb.UpdateTaskRequest) (*pb.UpdateTaskResponse, error) {
 	log.Printf("Received UpdateTask request: %v", req)
 
-	// Check if task exists
+	// Convert protobuf request to internal model
+	updateReq := models.FromProtoUpdateTaskRequest(req)
+
+	// Validate the request
+	if err := updateReq.Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "validation failed: %v", err)
+	}
+
+	// Check if task exists and get current task
 	existingTask, err := s.taskRepo.GetTask(ctx, req.Id)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "task with ID %s not found", req.Id)
 	}
 
 	// Update task fields
-	if req.Title != "" {
-		existingTask.Title = req.Title
-	}
-	if req.Description != "" {
-		existingTask.Description = req.Description
-	}
-	existingTask.Completed = req.Completed
-	existingTask.UpdatedAt = time.Now().Format(time.RFC3339)
+	existingTask.Title = updateReq.Title
+	existingTask.Description = updateReq.Description
+	existingTask.Completed = updateReq.Completed
+	existingTask.UpdatedAt = time.Now()
 
 	// Store updated task
 	if err := s.taskRepo.UpdateTask(ctx, existingTask); err != nil {
@@ -113,7 +118,7 @@ func (s *server) UpdateTask(ctx context.Context, req *pb.UpdateTaskRequest) (*pb
 		return nil, status.Errorf(codes.Internal, "failed to update task: %v", err)
 	}
 
-	return existingTask, nil
+	return existingTask.ToProtoUpdateTaskResponse(), nil
 }
 
 // DeleteTask removes a task by ID
@@ -126,9 +131,7 @@ func (s *server) DeleteTask(ctx context.Context, req *pb.DeleteTaskRequest) (*pb
 		return nil, status.Errorf(codes.NotFound, "task with ID %s not found", req.Id)
 	}
 
-	return &pb.DeleteTaskResponse{
-		Success: true,
-	}, nil
+	return models.ToProtoDeleteTaskResponse(true), nil
 }
 
 func main() {
